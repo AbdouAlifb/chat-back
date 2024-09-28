@@ -30,3 +30,7 @@ server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
+const clientauthRoutes = require('./routes/clientauthRoutes');
+app.use('/api/client/auth', clientauthRoutes);
+
+
