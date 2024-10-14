@@ -16,6 +16,28 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+exports.getMe = async (req, res) => {
+    const token = req.headers.authorization.split(' ')[1]; // Get token from the header
+  
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication token is missing' });
+    }
+  
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET); // Decode the token to get the user ID
+      const user = await Client.findById(decoded._id); // Find user by ID
+  
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+  
+      // Return the authenticated user's information
+      res.status(200).json(user);
+    } catch (error) {
+      res.status(401).json({ message: 'Invalid token' });
+    }
+  };
+
 const generatePassword = () => {
     return crypto.randomBytes(8).toString('hex'); 
 };
