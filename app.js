@@ -33,4 +33,7 @@ server.listen(PORT, () => {
 const clientauthRoutes = require('./routes/clientauthRoutes');
 app.use('/api/client/auth', clientauthRoutes);
 
+const profileRoutes = require('./routes/profileRoutes');
+app.use('/api/client', profileRoutes);
+
 
