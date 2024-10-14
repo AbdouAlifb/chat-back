@@ -52,10 +52,10 @@ exports.register = async (req, res) => {
         if (clientExistsByClientname) {
             return res.status(401).json({ message: 'Client name already exists' });
         }
-        const validationResult = await validate(email);
-        if (!validationResult.valid) {
-            return res.status(400).json({ message: 'Email is not valid. Please try again!' });
-        }
+        // const validationResult = await validate(email);
+        // if (!validationResult.valid) {
+        //     return res.status(400).json({ message: 'Email is not valid. Please try again!' });
+        // }
         
         const client = new Client({
             clientname,
