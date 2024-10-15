@@ -1,59 +1,82 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { dbConnect } = require('./utiles/dbConnect'); // Database connection utility
+const { dbConnect } = require('./utiles/dbConnect');
 const app = express();
 const http = require('http');
-const { Server } = require('socket.io'); // Import Socket.IO for real-time communication
 const path = require('path');
+const socketIO = require('socket.io');  
+const jwt = require('jsonwebtoken');
 
-// Create HTTP server
 const server = http.createServer(app);
 
-// Setup Socket.IO
-const io = new Server(server, {
-  cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001'], // Allowed front-end origins
-    credentials: true,
-  },
-});
-
-// Middleware to parse JSON requests
 app.use(express.json());
 
-// CORS configuration for front-end
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'], // Frontend URLs
-  credentials: true, // Enable sending cookies and auth tokens
+  origin: ['http://localhost:3000', 'http://localhost:3001',
+
+  ],
+  credentials: true 
 }));
 
-// Connect to MongoDB
-dbConnect();
-
-// // Initialize routes for user authentication
-const clientauthRoutes = require('./routes/clientauthRoutes');
-app.use('/api/client/auth', clientauthRoutes);
-app.use('', clientauthRoutes);
-
-
-// Socket.IO logic for real-time messaging
-io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
-
-  // Listen for incoming chat messages from clients
-  socket.on('chat message', (msg) => {
-    // Broadcast the message to all connected clients
-    io.emit('chat message', msg);
-  });
-
-  // Handle user disconnects
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-  });
+app.get('/', (req, res) => {
+  res.send('Hello World!');
 });
 
-// Server listen port
-const PORT = process.env.PORT || 5000;
+
+dbConnect();
+
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+
+const io = socketIO(server, {
+  cors: {
+    origin: ['http://localhost:3000'], // Your frontend URL
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+// Map to store connected clients
+const onlineClients = new Map();
+
+// Socket.IO Authentication Middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) return next(new Error('Authentication error'));
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, client) => {
+    if (err) return next(new Error('Authentication error'));
+    socket.clientData = client;
+    next();
+  });
+});
+
+io.on('connection', (socket) => {
+  const clientId = socket.clientData.clientId;
+  onlineClients.set(clientId, socket.id);
+  console.log(`Client connected: ${clientId}`);
+
+  socket.on('disconnect', () => {
+    onlineClients.delete(clientId);
+    console.log(`Client disconnected: ${clientId}`);
+  });
+
+  socket.on('chat message', (msg) => {
+    const receiverSocketId = onlineClients.get(msg.receiver);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('chat message', msg);
+    }
+  });
+});
+const clientauthRoutes = require('./routes/clientauthRoutes');
+app.use('/api/client/auth', clientauthRoutes);
+
+const profileRoutes = require('./routes/profileRoutes');
+app.use('/api/client', profileRoutes);
+
+
+const messageRoutes = require('./routes/messageRoutes');
+app.use('/api/messages', messageRoutes);
