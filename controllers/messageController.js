@@ -3,32 +3,41 @@
 const Message = require('../models/Message');
 const Client = require('../models/client');
 
-// Send a message
 exports.sendMessage = async (req, res) => {
-    const { receiverId, content } = req.body;
-    const senderId = req.client.id;
-    console.log('req.client:', req.client); 
-
   try {
-    const receiver = await Client.findById(receiverId);
-    if (!receiver) {
-      return res.status(404).json({ message: 'Receiver not found' });
+    const { receiver, content,sender } = req.body;
+
+    // Assuming the sender is the logged-in user
+    // const sender = req.sender;
+
+    console.log('Sender (client ID):', sender); // Log sender ID
+    console.log('Receiver (selectedUser ID):', receiver); // Log receiver ID
+    console.log('Message content:', content); // Log message content
+
+    if (!sender) {
+      return res.status(400).json({ error: 'Sender is required' });
     }
 
-    const message = new Message({
-      sender: senderId,
-      receiver: receiverId,
+    if (!receiver || !content) {
+      return res.status(400).json({ error: 'Receiver and content are required' });
+    }
+
+    const newMessage = new Message({
+      sender,
+      receiver,
       content,
     });
 
-    await message.save();
+    await newMessage.save();
 
-    res.status(201).json(message);
+    res.status(201).json({ message: 'Message sent successfully', data: newMessage });
   } catch (error) {
     console.error('Error sending message:', error);
-    res.status(500).json({ message: 'Error sending message', error });
+    res.status(500).json({ error: 'Server error' });
   }
 };
+
+
 
 // Get messages between two clients
 exports.getMessages = async (req, res) => {
