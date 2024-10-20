@@ -2,40 +2,53 @@
 
 const Message = require('../models/Message');
 const Client = require('../models/client');
+const path = require('path');
+
 
 exports.sendMessage = async (req, res) => {
   try {
-    const { receiver, content,sender } = req.body;
+    // Récupération du corps de la requête
+    const { message } = req.body;
 
-    // Assuming the sender is the logged-in user
-    // const sender = req.sender;
-
-    console.log('Sender (client ID):', sender); // Log sender ID
-    console.log('Receiver (selectedUser ID):', receiver); // Log receiver ID
-    console.log('Message content:', content); // Log message content
-
-    if (!sender) {
-      return res.status(400).json({ error: 'Sender is required' });
+    // Vérifiez si le message est présent
+    if (!message) {
+      return res.status(400).json({ error: 'Message data is required' });
     }
 
-    if (!receiver || !content) {
-      return res.status(400).json({ error: 'Receiver and content are required' });
-    }
+    // Parse le corps du message pour extraire les informations
+    const { content, sender, receiver } = JSON.parse(message);
 
-    const newMessage = new Message({
+    // Création d'un nouvel objet de message
+    const newMessageData = {
       sender,
       receiver,
-      content,
-    });
+      content: content || '',
+    };
 
+    // Vérification des fichiers envoyés
+    if (req.file) {
+      const fileExtension = path.extname(req.file.originalname).toLowerCase(); // Obtenir l'extension du fichier
+      const filePath = req.file.path.replace(/\\/g, '/'); // Remplacez le séparateur de chemin pour la compatibilité
+
+      if (fileExtension === '.pdf') {
+        newMessageData.file = filePath; // Stocker le PDF dans le champ 'file'
+      } else if (fileExtension === '.jpg' || fileExtension === '.jpeg' || fileExtension === '.png') {
+        newMessageData.image = filePath; // Stocker l'image dans le champ 'image'
+      }
+    }
+
+    // Création et enregistrement du nouveau message
+    const newMessage = new Message(newMessageData);
     await newMessage.save();
 
+    // Réponse réussie
     res.status(201).json({ message: 'Message sent successfully', data: newMessage });
   } catch (error) {
     console.error('Error sending message:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Failed to send message' });
   }
 };
+
 
 
 
@@ -43,6 +56,7 @@ exports.sendMessage = async (req, res) => {
 exports.getMessages = async (req, res) => {
   const { clientId } = req.client;
   const { otherClientId } = req.params;
+
 
   try {
     const messages = await Message.find({
