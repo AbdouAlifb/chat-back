@@ -1,5 +1,5 @@
 // controllers/chatController.js
-const Message = require('../models/message');
+const Message = require('../models/Message');
 
 // Get chat messages between two users
 exports.getMessages = async (req, res) => {
