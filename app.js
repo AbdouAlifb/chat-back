@@ -22,7 +22,8 @@ app.use(cors({
 app.get('/', (req, res) => {
   res.send('Hello World!');
 });
-
+app.use(express.json({ limit: '50mb' })); // Increase the limit
+app.use(express.urlencoded({ limit: '50mb', extended: true })); 
 
 dbConnect();
 
@@ -36,6 +37,7 @@ const io = socketIO(server, {
   cors: {
     origin: ['http://localhost:3000'], // Your frontend URL
     methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   },
 });
