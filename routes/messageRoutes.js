@@ -10,9 +10,10 @@ router.get('/clients' , messageController.getClients);
 
 // Send a message
 router.post('/send', upload.single('file'), messageController.sendMessage);
-
+router.get('/:senderId/:receiverId', messageController.getMessages);
 // Get messages between two clients
-router.get('/:otherClientId',authenticateToken, messageController.getMessages);
+// router.get('/:otherClientId', messageController.getMessages);
+
 
 
 

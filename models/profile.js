@@ -7,10 +7,18 @@ const profileSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    nationalCardCode: { type: String, default: null },
-    phoneNumber: { type: String, default: null },
-    birthday: { type: Date, default: null },
-    additionalDetails: { type: mongoose.Schema.Types.Mixed, default: {} }
-}, { timestamps: true });
+    nationalCardCode: { type: String, required :false },
+    phoneNumber: { type: String, required :false },
+    birthday: { type: Date, required :false },
+    profileImage: { type: String, required: false },
+    additionalDetails: [
+        {
+          name: { type: String, required: true },
+          value: { type: String, required: true },
+        },
+      ],
+},
+{ timestamps: true, strict: false }
+);
 
 module.exports = mongoose.model('profile', profileSchema);

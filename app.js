@@ -11,14 +11,14 @@ const jwt = require('jsonwebtoken');
 const server = http.createServer(app);
 
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001',
+  // origin: ['http://localhost:3000', 'http://localhost:3001','http://localhost:3001/app',
 
-  ],
-  credentials: true ,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  // ],
+  origin: '*',
+  credentials: true 
 }));
 app.use(express.json({ limit: '1mb' })); // Adjust as necessary
 app.use(express.urlencoded({ limit: '1mb', extended: true })); // Adjust as necessary
@@ -87,3 +87,4 @@ app.use('/api/client', profileRoutes);
 
 const messageRoutes = require('./routes/messageRoutes');
 app.use('/api/messages', messageRoutes);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
