@@ -14,9 +14,10 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001',
+  // origin: ['http://localhost:3000', 'http://localhost:3001','http://localhost:3001/app',
 
-  ],
+  // ],
+  origin: '*',
   credentials: true 
 }));
 
