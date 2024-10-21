@@ -84,3 +84,4 @@ app.use('/api/client', profileRoutes);
 
 const messageRoutes = require('./routes/messageRoutes');
 app.use('/api/messages', messageRoutes);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

@@ -10,6 +10,7 @@ const profileSchema = new mongoose.Schema({
     nationalCardCode: { type: String, required :false },
     phoneNumber: { type: String, required :false },
     birthday: { type: Date, required :false },
+    profileImage: { type: String, required: false },
     additionalDetails: [
         {
           name: { type: String, required: true },

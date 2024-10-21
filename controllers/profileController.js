@@ -1,5 +1,7 @@
 const Profile = require('../models/profile');
 const Client = require('../models/client');
+const path = require('path');
+
 exports.upsertProfile = async (req, res) => {
     const { clientId } = req.params;
     const profileData = req.body;
@@ -14,8 +16,24 @@ exports.upsertProfile = async (req, res) => {
         // Prepare the update object
         const updateData = {};
 
+        // Handle the uploaded file
+        if (req.file) {
+            // File was uploaded
+            if (!updateData.$set) updateData.$set = {};
+            updateData.$set.profileImage = req.file.filename;
+        } else if (profileData.profileImage === '' || profileData.profileImage === null || profileData.profileImage === undefined) {
+            // If profileImage is empty in the body, unset it
+            if (!updateData.$unset) updateData.$unset = {};
+            updateData.$unset.profileImage = "";
+        }
+
         // Loop through each key in profileData
         for (const [key, value] of Object.entries(profileData)) {
+            if (key === 'profileImage') {
+                // Already handled above
+                continue;
+            }
+
             if (value === '' || value === null || value === undefined) {
                 // If the value is empty, prepare to unset the field
                 if (!updateData.$unset) updateData.$unset = {};
@@ -25,11 +43,14 @@ exports.upsertProfile = async (req, res) => {
                 if (!updateData.$set) updateData.$set = {};
 
                 // Special handling for additionalDetails
-                if (key === 'additionalDetails' && Array.isArray(value)) {
-                    // Filter out empty additionalDetails
-                    updateData.$set.additionalDetails = value.filter(
-                        (detail) => detail.name && detail.value
-                    );
+                if (key === 'additionalDetails') {
+                    // Parse JSON string if necessary
+                    const additionalDetails = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (Array.isArray(additionalDetails)) {
+                        updateData.$set.additionalDetails = additionalDetails.filter(
+                            (detail) => detail.name && detail.value
+                        );
+                    }
                 } else {
                     updateData.$set[key] = value;
                 }
@@ -45,11 +66,9 @@ exports.upsertProfile = async (req, res) => {
 
         return res.status(200).json(profile);
     } catch (error) {
-        return res.status(500).json({ message: 'Error updating profile', error: error });
+        return res.status(500).json({ message: 'Error updating profile', error: error.message });
     }
 };
-
-
 // Get profile by client ID
 exports.getProfile = async (req, res) => {
     const { clientId } = req.params;
