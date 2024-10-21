@@ -1,5 +1,5 @@
 // routes/messageRoutes.js
-
+// const path = require('path');
 const express = require('express');
 const router = express.Router();
 const messageController = require('../controllers/messageController');
@@ -13,5 +13,13 @@ router.post('/send', upload.single('file'), messageController.sendMessage);
 
 // Get messages between two clients
 router.get('/:otherClientId',authenticateToken, messageController.getMessages);
+
+
+
+// Serve the uploads folder
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+
+
 
 module.exports = router;

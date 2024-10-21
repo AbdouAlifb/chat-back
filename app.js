@@ -16,8 +16,13 @@ app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:3001',
 
   ],
-  credentials: true 
+  credentials: true ,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+app.use(express.json({ limit: '1mb' })); // Adjust as necessary
+app.use(express.urlencoded({ limit: '1mb', extended: true })); // Adjust as necessary
+
 
 app.get('/', (req, res) => {
   res.send('Hello World!');
