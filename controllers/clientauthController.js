@@ -16,6 +16,25 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+exports.searchClients = async (req, res) => {
+    const { query } = req.query; // get search query from request
+    if (!query) return res.status(400).json({ message: 'No search query provided' });
+
+    try {
+        const clients = await Client.find({
+            $or: [
+                { clientname: { $regex: query, $options: 'i' } },  // search by clientname
+                { email: { $regex: query, $options: 'i' } }       // search by email
+            ]
+        }).select('clientname email'); // select only the fields you want to return
+
+        res.status(200).json(clients);
+    } catch (error) {
+        res.status(500).json({ message: 'Error searching clients', error });
+    }
+};
+
+
 exports.getMe = async (req, res) => {
     const token = req.headers.authorization.split(' ')[1]; // Get token from the header
   
