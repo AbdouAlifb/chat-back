@@ -16,7 +16,7 @@ exports.sendMessage = async (req, res) => {
     }
 
     // Parse le corps du message pour extraire les informations
-    const { content, sender, receiver } = JSON.parse(message);
+    const {content, sender, receiver } = JSON.parse(message);
 
     // Création d'un nouvel objet de message
     const newMessageData = {
@@ -24,9 +24,10 @@ exports.sendMessage = async (req, res) => {
       receiver,
       
     };
-     if(req.content){
-      newMessageData.content = req.content;
-     }
+    
+    if (content && content.trim()) {
+      newMessageData.content = content.trim(); // Ajoute uniquement si le contenu est valide
+    }
     // Vérification des fichiers envoyés
     if (req.file) {
       const fileExtension = path.extname(req.file.originalname).toLowerCase(); // Obtenir l'extension du fichier
@@ -103,5 +104,34 @@ exports.getClients = async (req, res) => {
   } catch (error) {
     console.error('Error fetching clients:', error);
     res.status(500).json({ message: 'Error fetching clients', error });
+  }
+};
+
+
+// Ajoutez cette nouvelle fonction dans messageController.js
+exports.searchMessages = async (req, res) => {
+  try {
+    const { senderId, receiverId, query } = req.params;
+    
+    // Validate parameters
+    if (!senderId || !receiverId || !query) {
+      return res.status(400).json({ message: 'Missing required parameters' });
+    }
+
+    const messages = await Message.find({
+      $or: [
+        { sender: senderId, receiver: receiverId },
+        { sender: receiverId, receiver: senderId }
+      ],
+      content: { $regex: query, $options: 'i' }
+    })
+    .sort({ createdAt: 1 })
+    .populate('sender', 'clientname')
+    .populate('receiver', 'clientname');
+
+    res.status(200).json(messages);
+  } catch (error) {
+    console.error('Error searching messages:', error);
+    res.status(500).json({ message: 'Error searching messages', error: error.message });
   }
 };

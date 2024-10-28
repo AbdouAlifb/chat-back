@@ -15,7 +15,12 @@ router.get('/:senderId/:receiverId', messageController.getMessages);
 // router.get('/:otherClientId', messageController.getMessages);
 
 
+// routes/messageRoutes.js
 
+// Search messages with pagination
+// router.get('/search/:senderId/:receiverId', messageController.searchMessages);
+// Dans routes/messageRoutes.js
+router.get('/search/:senderId/:receiverId/:query', messageController.searchMessages);
 
 // Serve the uploads folder
 // app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
