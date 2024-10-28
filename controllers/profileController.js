@@ -29,32 +29,18 @@ exports.upsertProfile = async (req, res) => {
 
         // Loop through each key in profileData
         for (const [key, value] of Object.entries(profileData)) {
-            if (key === 'profileImage') {
-                // Already handled above
-                continue;
-            }
-
-            if (value === '' || value === null || value === undefined) {
-                // If the value is empty, prepare to unset the field
+            if (key === 'profileImage') continue;
+            if (!value) {
                 if (!updateData.$unset) updateData.$unset = {};
                 updateData.$unset[key] = "";
             } else {
-                // If the value is non-empty, prepare to set the field
                 if (!updateData.$set) updateData.$set = {};
-
-                // Special handling for additionalDetails
-                if (key === 'additionalDetails') {
-                    // Parse JSON string if necessary
-                    const additionalDetails = typeof value === 'string' ? JSON.parse(value) : value;
-                    if (Array.isArray(additionalDetails)) {
-                        updateData.$set.additionalDetails = additionalDetails.filter(
-                            (detail) => detail.name && detail.value
-                        );
-                    }
+                if (key === 'additionalDetails' && typeof value === 'object') {
+                    updateData.$set[key] = value;
                 } else {
                     updateData.$set[key] = value;
                 }
-            }
+            }   
         }
 
         // Upsert the profile data

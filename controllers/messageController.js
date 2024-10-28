@@ -4,7 +4,6 @@ const Message = require('../models/Message');
 const Client = require('../models/client');
 const path = require('path');
 
-
 exports.sendMessage = async (req, res) => {
   try {
     // Récupération du corps de la requête
@@ -22,12 +21,13 @@ exports.sendMessage = async (req, res) => {
     const newMessageData = {
       sender,
       receiver,
-      
     };
-    
+
+    // Ajoutez le contenu uniquement s'il n'est pas vide
     if (content && content.trim()) {
       newMessageData.content = content.trim(); // Ajoute uniquement si le contenu est valide
     }
+
     // Vérification des fichiers envoyés
     if (req.file) {
       const fileExtension = path.extname(req.file.originalname).toLowerCase(); // Obtenir l'extension du fichier

@@ -11,12 +11,10 @@ const profileSchema = new mongoose.Schema({
     phoneNumber: { type: String, required :false },
     birthday: { type: Date, required :false },
     profileImage: { type: String, required: false },
-    additionalDetails: [
-        {
-          name: { type: String, required: true },
-          value: { type: String, required: true },
-        },
-      ],
+    additionalDetails: {
+      type: Map,
+      of: String
+    },
 },
 { timestamps: true, strict: false }
 );
