@@ -1,14 +1,16 @@
-const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
 
-const messageSchema = new mongoose.Schema(
-  {
-    sender: { type: mongoose.Schema.Types.ObjectId, ref: 'client', required: true },
-    receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'client', required: true },
-    content: { type: String, required: false },
-    file: { type: String, required: false  }, 
-    image: { type: String, required: false } 
-  },
-  { timestamps: true }
-);
+class Message {
+  constructor({ sender, receiver, content = null, file = null, image = null }) {
+    this.id = uuidv4(); // Generate a unique ID for the message
+    this.sender = sender;
+    this.receiver = receiver;
+    this.content = content;
+    this.file = file;
+    this.image = image;
+    this.createdAt = new Date().toISOString();
+    this.updatedAt = new Date().toISOString();
+  }
+}
 
-module.exports = mongoose.model('Message', messageSchema);
+module.exports = Message;

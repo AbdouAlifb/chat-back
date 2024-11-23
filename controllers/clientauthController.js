@@ -5,6 +5,7 @@ const { validate } = require('deep-email-validator');
 const Client = require('../models/client');
 // const Token = require('../models/token');
 const ClientToken = require('../models/ClientToken ');
+const jwt = require('jsonwebtoken');
 
 const nodemailer = require('nodemailer');
 
@@ -16,21 +17,41 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+const neo4j = require('neo4j-driver');
+
+// Connexion à la base de données Neo4j
+const driver = neo4j.driver(
+  process.env.NEO4J_URI,  // L'URI de votre base de données Neo4j
+  neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)  // Authentification
+);
 exports.searchClients = async (req, res) => {
-    const { query } = req.query; // get search query from request
+    const { query } = req.query; // Récupérer la requête de recherche
     if (!query) return res.status(400).json({ message: 'No search query provided' });
 
-    try {
-        const clients = await Client.find({
-            $or: [
-                { clientname: { $regex: query, $options: 'i' } },  // search by clientname
-                { email: { $regex: query, $options: 'i' } }       // search by email
-            ]
-        }).select('clientname email'); // select only the fields you want to return
+    const session = driver.session();
 
-        res.status(200).json(clients);
+    try {
+        // Requête pour chercher les clients par clientname ou email
+        const result = await session.run(
+            `MATCH (c:Client)
+             WHERE c.clientname CONTAINS $query OR c.email CONTAINS $query
+             RETURN c.clientname, c.email`, 
+            { query } // Paramètre pour éviter les injections Cypher
+        );
+
+        // Extraire les propriétés des clients
+        const clients = result.records.map(record => ({
+            clientname: record.get('c.clientname'),
+            email: record.get('c.email')
+        }));
+
+        console.log(clients)
+        res.status(200).json(clients); // Retourner les clients trouvés
     } catch (error) {
-        res.status(500).json({ message: 'Error searching clients', error });
+        console.error('Error searching clients:', error.message);
+        res.status(500).json({ message: 'Error searching clients', error: error.message });
+    } finally {
+        session.close(); // Fermer la session Neo4j
     }
 };
 
@@ -61,13 +82,26 @@ const generatePassword = () => {
     return crypto.randomBytes(8).toString('hex'); 
 };
 exports.getAllClients = async (req, res) => {
+    const session = driver.session();
+
     try {
-        const clients = await Client.find().sort({ createdAt: -1 });
-        res.status(200).json(clients);
+        // Requête pour récupérer tous les clients, triés par createdAt en ordre décroissant
+        const result = await session.run(
+            'MATCH (c:Client) RETURN c ORDER BY c.createdAt DESC'
+        );
+
+        // Extraire les propriétés des clients
+        const clients = result.records.map(record => record.get('c').properties);
+
+        res.status(200).json(clients); // Envoyer les clients comme réponse
     } catch (error) {
+        console.error('Error fetching clients:', error.message);
         res.status(500).json({ message: 'Error fetching clients', error: error.message });
+    } finally {
+        session.close(); // Toujours fermer la session
     }
 };
+
 exports.deleteClientByEmail = async (req, res) => {
     const { email } = req.body;
     try {
@@ -80,156 +114,199 @@ exports.deleteClientByEmail = async (req, res) => {
         res.status(500).json({ message: 'Error deleting client', error: error.message });
     }
 };
+// Fonction pour enregistrer un nouveau client
 exports.register = async (req, res) => {
+    const { clientname, email, password } = req.body; // Récupérer les données de la requête
+    const session = driver.session();
 
-    const { clientname, email, password } = req.body;  // Include password in the body
-    console.log("Registering new client with email:", email ,clientname , password ); 
     try {
-        const clientExists = await Client.findOne({ email });
-        if (clientExists) {
+        // Vérifier si un client avec le même email existe déjà
+        const emailResult = await session.run(
+            'MATCH (c:Client {email: $email}) RETURN c LIMIT 1',
+            { email }
+        );
+
+        if (emailResult.records.length > 0) {
             return res.status(409).json({ message: 'Email already exists' });
         }
-        const clientExistsByClientname = await Client.findOne({ clientname });
-        if (clientExistsByClientname) {
+
+        // Vérifier si un client avec le même clientname existe déjà
+        const clientnameResult = await session.run(
+            'MATCH (c:Client {clientname: $clientname}) RETURN c LIMIT 1',
+            { clientname }
+        );
+
+        if (clientnameResult.records.length > 0) {
             return res.status(401).json({ message: 'Client name already exists' });
         }
-        // const validationResult = await validate(email);
-        // if (!validationResult.valid) {
-        //     return res.status(400).json({ message: 'Email is not valid. Please try again!' });
-        // }
-        
-        const client = new Client({
-            clientname,
-            email,
-            password,  // Use the hashed password
-        });        
-        await client.save();
+
+        // Générer un ID client unique de 20 caractères
+        const clientId = crypto.randomBytes(10).toString('hex'); // 10 bytes = 20 caractères en hexadécimal
+
+        // Hacher le mot de passe avant de le sauvegarder
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Obtenir les timestamps actuels pour createdAt et updatedAt
+        const timestamp = new Date().toISOString();
+
+        // Créer un nouveau client dans Neo4j avec clientId, createdAt et updatedAt
+        await session.run(
+            `
+            CREATE (c:Client {id: $clientId, clientname: $clientname, email: $email, password: $password, createdAt: $createdAt, updatedAt: $updatedAt})
+            `,
+            {
+                clientId, // Inclure l'ID généré aléatoirement
+                clientname,
+                email,
+                password: hashedPassword,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+            }
+        );
+
         res.status(200).json({ message: 'The new Client has been added successfully!' });
+
     } catch (error) {
+        console.error('Error during client registration:', error.message);
         res.status(500).json({ message: 'Error registering the new client', error: error.message });
+    } finally {
+        session.close(); // Toujours fermer la session
     }
 };
-
-
+// Fonction de connexion
 exports.login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password } = req.body;  // Récupérer l'email et le mot de passe depuis la requête
+    const session = driver.session();
+
     try {
-        const client = await Client.findOne({ email });
-        if (!client) {
+        // Rechercher le client par email dans Neo4j
+        const clientResult = await session.run(
+            'MATCH (c:Client {email: $email}) RETURN c LIMIT 1',
+            { email }
+        );
+
+        if (clientResult.records.length === 0) {
             console.log('Login attempt failed - client not found:', email);
-            return res.status(404).json({ message: 'client not found' });
+            return res.status(404).json({ message: 'Client not found' });
         }
 
-        const isMatch = await bcrypt.compare(password, client.password);
+        // Extraire les données du client
+        const clientNode = clientResult.records[0].get('c').properties;
+
+        // Vérifier si le mot de passe est correct
+        const isMatch = await bcrypt.compare(password, clientNode.password);
         if (!isMatch) {
             console.log('Login attempt failed - invalid credentials:', email);
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
-        const token = await createToken({
-            clientId: client._id,
-        });
-        // const token = jwt.sign(
-        //     { id: client._id },
-        //     process.env.JWT_SECRET,
-        //     { expiresIn: '1h' }
-        //   );
+        // Générer un token JWT
+        const token = jwt.sign(
+            { clientId: clientNode.id, email: clientNode.email }, // Inclure les informations nécessaires
+            process.env.JWT_SECRET, // Utiliser la clé secrète définie dans vos variables d'environnement
+            { expiresIn: '1h' } // Durée de validité du token
+        );
 
+        // Configurer le cookie pour le token
         res.cookie('accessToken', token, {
             httpOnly: true,
             secure: true,
             sameSite: 'None',
-            expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+            expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 jours
         });
-        console.log('Client logged in successfully:', client.clientname);
+
+        console.log('Client logged in successfully:', clientNode.clientname);
         res.status(200).json({
             token,
             client: {
-                clientId: client._id,
-                clientname: client.clientname,
-                email: client.email,
+                clientId: clientNode.id,
+                clientname: clientNode.clientname,
+                email: clientNode.email,
             },
-            message: 'Logged in successfully'
+            message: 'Logged in successfully',
         });
+
     } catch (error) {
-        console.error('Error during login:', error);
+        console.error('Error during login:', error.message);
         res.status(500).json({ message: 'Error logging in', error: error.message });
+    } finally {
+        session.close(); // Toujours fermer la session
     }
 };
 
-exports.requestPassword = async (req, res) => {
-    const { email } = req.body;
-    try {
-        const client = await Client.findOne({ email });
-        if (!client) {
-            return res.status(404).json({ message: "Client does not exist" });
-        }
-        let token = await ClientToken.findOne({ clientId: client._id });
-        if (token) await token.deleteOne();
+// exports.requestPassword = async (req, res) => {
+//     const { email } = req.body;
+//     try {
+//         const client = await Client.findOne({ email });
+//         if (!client) {
+//             return res.status(404).json({ message: "Client does not exist" });
+//         }
+//         let token = await ClientToken.findOne({ clientId: client._id });
+//         if (token) await token.deleteOne();
 
-        let resetToken = crypto.randomBytes(32).toString("hex");
-        const hash = await bcrypt.hash(resetToken, 12);
+//         let resetToken = crypto.randomBytes(32).toString("hex");
+//         const hash = await bcrypt.hash(resetToken, 12);
 
-        await new ClientToken({
-            clientId: client._id,
-            token: hash,
-            createdAt: Date.now(),
-        }).save();
+//         await new ClientToken({
+//             clientId: client._id,
+//             token: hash,
+//             createdAt: Date.now(),
+//         }).save();
 
-        const link = `${process.env.CLIENT_URL}/authentication/reset-password?token=${resetToken}&id=${client._id}`;
+//         const link = ${process.env.CLIENT_URL}/authentication/reset-password?token=${resetToken}&id=${client._id};
         
-        const mailOptions = {
-            receiverEmail: client.email,
-            subject: "Password Reset",
-            emailText: `Hello ${client.clientname},<br><br>Please use the following link to reset your password: <a href="${link}">Reset Password</a><br><br>`,
-            isHtml: true, 
-            title: "Password Reset"
-        };
-        setImmediate(() => exports.sendEmail(mailOptions, res));
+//         const mailOptions = {
+//             receiverEmail: client.email,
+//             subject: "Password Reset",
+//             emailText: Hello ${client.clientname},<br><br>Please use the following link to reset your password: <a href="${link}">Reset Password</a><br><br>,
+//             isHtml: true, 
+//             title: "Password Reset"
+//         };
+//         setImmediate(() => exports.sendEmail(mailOptions, res));
 
-    } catch (error) {
-        console.error("Error during client password reset request:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
-};
+//     } catch (error) {
+//         console.error("Error during client password reset request:", error);
+//         res.status(500).json({ message: "Internal server error" });
+//     }
+// };
 
-exports.resetPassword = async (req, res) => {
-    const { clientId, token, password } = req.body;
-    console.log(clientId, token, password );
-    try {
-        let passwordResetToken = await ClientToken.findOne({ clientId });
+// exports.resetPassword = async (req, res) => {
+//     const { clientId, token, password } = req.body;
+//     console.log(clientId, token, password );
+//     try {
+//         let passwordResetToken = await ClientToken.findOne({ clientId });
 
-        if (!passwordResetToken) {
-            return res.status(404).json({ message: 'Invalid or expired password reset token' });
-        }
-        const isValid = await bcrypt.compare(token, passwordResetToken.token);
-        if (!isValid) {
-            return res.status(404).json({ message: 'Invalid or expired password reset token' });
-        }
-        const hash = await bcrypt.hash(password, 12);
-        await Client.updateOne(
-            { _id: clientId },
-            { $set: { password: hash } },
-            { new: true }
-        );
-        await passwordResetToken.deleteOne();
-        const client = await Client.findById(clientId); 
+//         if (!passwordResetToken) {
+//             return res.status(404).json({ message: 'Invalid or expired password reset token' });
+//         }
+//         const isValid = await bcrypt.compare(token, passwordResetToken.token);
+//         if (!isValid) {
+//             return res.status(404).json({ message: 'Invalid or expired password reset token' });
+//         }
+//         const hash = await bcrypt.hash(password, 12);
+//         await Client.updateOne(
+//             { _id: clientId },
+//             { $set: { password: hash } },
+//             { new: true }
+//         );
+//         await passwordResetToken.deleteOne();
+//         const client = await Client.findById(clientId); 
 
-        const newToken = await createToken({
-            clientId
-        });
-        res.cookie('accessToken', newToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: 'None',
-            expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        });
+//         const newToken = await createToken({
+//             clientId
+//         });
+//         res.cookie('accessToken', newToken, {
+//             httpOnly: true,
+//             secure: true,
+//             sameSite: 'None',
+//             expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+//         });
 
-        res.status(200).json({ message: 'Password reset successfully', token: newToken,client });
-    } catch (error) {
-        res.status(500).json({ message: 'Error resetting password', error: error.message });
-    }
-};
+//         res.status(200).json({ message: 'Password reset successfully', token: newToken,client });
+//     } catch (error) {
+//         res.status(500).json({ message: 'Error resetting password', error: error.message });
+//     }
+// };
 
 // Send Email
 exports.sendEmail = (mailOptions, res) => {
