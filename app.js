@@ -9,6 +9,12 @@ const socketIO = require('socket.io');
 const jwt = require('jsonwebtoken');
 
 const server = http.createServer(app);
+dbConnect();
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -30,12 +36,6 @@ app.get('/', (req, res) => {
 app.use(express.json({ limit: '50mb' })); // Increase the limit
 app.use(express.urlencoded({ limit: '50mb', extended: true })); 
 
-dbConnect();
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
 
 
 const io = socketIO(server, {

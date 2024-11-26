@@ -23,3 +23,18 @@ module.exports.dbConnect = async () => {
     console.error('Erreur de connexion à la base de données :', error.message);
   }
 };
+const driver = neo4j.driver(
+  process.env.NEO4J_URI,
+  neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
+);
+
+async function dbConnect() {
+  try {
+    await driver.verifyConnectivity();
+    console.log('Database connected...');
+  } catch (error) {
+    console.error('Erreur de connexion à la base de données :', error.message);
+  }
+}
+
+module.exports = { dbConnect, driver };
