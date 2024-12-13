@@ -241,64 +241,85 @@ function generateAccessToken(email) {
       return res.status(500).json({ message: 'Error registering the new client', error: error.message });
     }
   };
+
   exports.login = async (req, res) => {
     const { email, password } = req.body;
   
+    // Input Validation
     if (!email || !password) {
       return res.status(400).json({ message: 'Missing email or password' });
     }
   
-    try {
-      const clientByEmailTable = getAsyncTable('client_by_email');
-      const clientsTable = getAsyncTable('clients');
+    console.log(`Login attempt for email: ${email}`);
   
+    try {
+      // Await the async table references
+      const clientByEmailTable = await getAsyncTable('client_by_email');
+      const clientsTable = await getAsyncTable('clients');
+  
+      // Fetch email data
       let emailData;
       try {
         emailData = await clientByEmailTable.get(email);
+        console.log('Retrieved email data:', emailData);
       } catch (err) {
-        if (err.message.includes('404')) emailData = null; else throw err;
+        console.error('Error fetching email data:', err);
+        return res.status(500).json({ message: 'Error fetching client data', error: err.message });
       }
   
-      if (!emailData) {
-        console.log('Login attempt failed - client not found:', email);
+      if (!emailData || emailData.length === 0) {
+        console.log('Client not found for email:', email);
         return res.status(404).json({ message: 'Client not found' });
       }
   
-      const clientId = emailData.columns?.['info:clientId']?.$;
+      // Extract clientId from emailData array
+      const clientIdObj = emailData.find(col => col.column === 'info:clientId');
+      const clientId = clientIdObj ? clientIdObj.$ : null;
+  
       if (!clientId) {
-        console.log('Login attempt failed - clientId not found for email:', email);
+        console.log('clientId not found for email:', email);
         return res.status(404).json({ message: 'Client not found' });
       }
   
+      // Fetch client data using clientId
       let clientData;
       try {
         clientData = await clientsTable.get(clientId);
+        console.log('Retrieved client data:', clientData);
       } catch (err) {
-        if (err.message.includes('404')) clientData = null; else throw err;
+        console.error('Error fetching client data:', err);
+        return res.status(500).json({ message: 'Error fetching client data', error: err.message });
       }
   
-      if (!clientData) {
-        console.log('Login attempt failed - client not found after email mapping:', email);
+      if (!clientData || clientData.length === 0) {
+        console.log('Client data not found for clientId:', clientId);
         return res.status(404).json({ message: 'Client not found' });
       }
   
-      const hashedPassword = clientData.columns['info:password']?.$ || '';
-      const clientname = clientData.columns['info:clientname']?.$ || '';
+      // Extract hashed password and clientname from clientData array
+      const passwordObj = clientData.find(col => col.column === 'info:password');
+      const hashedPassword = passwordObj ? passwordObj.$ : '';
   
+      const clientnameObj = clientData.find(col => col.column === 'info:clientname');
+      const clientname = clientnameObj ? clientnameObj.$ : '';
+  
+      // Compare passwords
       const isMatch = await bcrypt.compare(password, hashedPassword);
       if (!isMatch) {
-        console.log('Login attempt failed - invalid credentials:', email);
+        console.log('Invalid password attempt for email:', email);
         return res.status(401).json({ message: 'Invalid credentials' });
       }
   
+      // Generate tokens
       const accessToken = generateAccessToken(email);
       const refreshToken = generateRefreshToken(email);
   
+      // Set refresh token as HTTP-only cookie
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production', 
         sameSite: 'Strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
   
       console.log('Client logged in successfully:', clientname);
