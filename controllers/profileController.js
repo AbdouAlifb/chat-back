@@ -2,6 +2,7 @@ const Profile = require('../models/profile');
 const Client = require('../models/client');
 const ProfileModel = require('../models/profileModel');
 const path = require('path');
+
 exports.upsertProfile = async (req, res) => {
   const { clientId } = req.params;
   const profileData = req.body;

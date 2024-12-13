@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { dbConnect } = require('./utiles/dbConnect');
+const { dbConnect } = require('./utiles/dbConnect'); // Ensure the path is correct
+
 const app = express();
 const http = require('http');
 const path = require('path');
@@ -9,25 +10,31 @@ const socketIO = require('socket.io');
 const jwt = require('jsonwebtoken');
 
 const server = http.createServer(app);
-dbConnect();
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
 
-app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+// Middleware Setup
 app.use(cors({
-  // origin: ['http://localhost:3000', 'http://localhost:3001','http://localhost:3001/app',
-
-  // ],
   origin: '*',
   credentials: true 
 }));
 app.use(express.json({ limit: '1mb' })); // Adjust as necessary
 app.use(express.urlencoded({ limit: '1mb', extended: true })); // Adjust as necessary
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+console.log('Starting application...');
+
+async function startServer() {
+  try {
+    await dbConnect();
+    server.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to connect to HBase:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 
 app.get('/', (req, res) => {
@@ -81,10 +88,10 @@ io.on('connection', (socket) => {
 const clientauthRoutes = require('./routes/clientauthRoutes');
 app.use('/api/client/auth', clientauthRoutes);
 
-const profileRoutes = require('./routes/profileRoutes');
-app.use('/api/client', profileRoutes);
+// const profileRoutes = require('./routes/profileRoutes');
+// app.use('/api/client', profileRoutes);
 
 
-const messageRoutes = require('./routes/messageRoutes');
-app.use('/api/messages', messageRoutes);
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// const messageRoutes = require('./routes/messageRoutes');
+// app.use('/api/messages', messageRoutes);
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

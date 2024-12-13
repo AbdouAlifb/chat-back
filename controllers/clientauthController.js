@@ -4,9 +4,10 @@ const { createToken } = require('../utiles/generateToken');
 const { validate } = require('deep-email-validator');
 const Client = require('../models/client');
 // const Token = require('../models/token');
+const { getAsyncTable } = require('../utiles/dbConnect');
 const ClientToken = require('../models/ClientToken ');
 const jwt = require('jsonwebtoken');
-
+const { tableAsync } = require('../utiles/dbConnect');
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
@@ -17,223 +18,305 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-const neo4j = require('neo4j-driver');
+// const neo4j = require('neo4j-driver');
 
 // Connexion à la base de données Neo4j
-const driver = neo4j.driver(
-  process.env.NEO4J_URI,  // L'URI de votre base de données Neo4j
-  neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)  // Authentification
-);
+// const driver = neo4j.driver(
+//   process.env.NEO4J_URI,  // L'URI de votre base de données Neo4j
+//   neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)  // Authentification
+// );
 exports.searchClients = async (req, res) => {
-    const { query } = req.query; // Récupérer la requête de recherche
+    const { query } = req.query;
     if (!query) return res.status(400).json({ message: 'No search query provided' });
-
-    const session = driver.session();
-
-    try {
-        // Requête pour chercher les clients par clientname ou email
-        const result = await session.run(
-            `MATCH (c:Client)
-             WHERE c.clientname CONTAINS $query OR c.email CONTAINS $query
-             RETURN c.clientname, c.email`, 
-            { query } // Paramètre pour éviter les injections Cypher
-        );
-
-        // Extraire les propriétés des clients
-        const clients = result.records.map(record => ({
-            clientname: record.get('c.clientname'),
-            email: record.get('c.email')
-        }));
-
-        console.log(clients)
-        res.status(200).json(clients); // Retourner les clients trouvés
-    } catch (error) {
-        console.error('Error searching clients:', error.message);
-        res.status(500).json({ message: 'Error searching clients', error: error.message });
-    } finally {
-        session.close(); // Fermer la session Neo4j
-    }
-};
-
-
-exports.getMe = async (req, res) => {
-    const token = req.headers.authorization.split(' ')[1]; // Get token from the header
   
+    // Instead of MATCH (c:Client)... use a Hive SELECT statement
+    // If you have a 'clients' table with 'clientname' and 'email' columns:
+    const searchQuery = `SELECT clientname, email FROM clients WHERE clientname LIKE '%${query}%' OR email LIKE '%${query}%'`;
+    
+    hive.execute(searchQuery, function(err, data) {
+      if (err) {
+        console.error('Error searching clients:', err);
+        return res.status(500).json({ message: 'Error searching clients', error: err.message });
+      }
+  
+      // data will be an array of results
+      // each row might come as an array of values depending on the driver used
+      // Adjust parsing accordingly
+      const clients = data.map(row => ({
+        clientname: row.clientname, // or row[0] depending on driver format
+        email: row.email           // or row[1]
+      }));
+      
+      return res.status(200).json(clients);
+    });
+  };
+  
+  exports.getMe = async (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ message: 'Authentication token is missing' });
     }
   
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET); // Decode the token to get the user ID
-      const user = await Client.findById(decoded._id); // Find user by ID
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const email = decoded.email;
   
-      if (!user) {
+      const clientByEmailTable = tableAsync('client_by_email');
+      const emailData = await clientByEmailTable.get(email).catch(err => {
+        if (err.message.includes('404')) return null; // Not found
+        throw err;
+      });
+  
+      if (!emailData) {
         return res.status(404).json({ message: 'User not found' });
       }
   
-      // Return the authenticated user's information
+      const clientId = emailData.columns['info:clientId']?.$;
+      if (!clientId) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+  
+      const clientsTable = tableAsync('clients');
+      const clientData = await clientsTable.get(clientId).catch(err => {
+        if (err.message.includes('404')) return null; // Not found
+        throw err;
+      });
+  
+      if (!clientData) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+  
+      const user = {
+        clientId: clientId,
+        clientname: clientData.columns['info:clientname']?.$ || '',
+        email: clientData.columns['info:email']?.$ || ''
+      };
+  
       res.status(200).json(user);
     } catch (error) {
-      res.status(401).json({ message: 'Invalid token' });
+      console.error('Error fetching user:', error.message);
+      return res.status(401).json({ message: 'Invalid token', error: error.message });
     }
   };
-
 const generatePassword = () => {
     return crypto.randomBytes(8).toString('hex'); 
 };
 exports.getAllClients = async (req, res) => {
-    const session = driver.session();
-
     try {
-        // Requête pour récupérer tous les clients, triés par createdAt en ordre décroissant
-        const result = await session.run(
-            'MATCH (c:Client) RETURN c ORDER BY c.createdAt DESC'
-        );
-
-        // Extraire les propriétés des clients
-        const clients = result.records.map(record => record.get('c').properties);
-
-        res.status(200).json(clients); // Envoyer les clients comme réponse
+      const clientsTable = tableAsync('clients');
+      const rows = await clientsTable.scan();
+  
+      const clients = rows.map(row => ({
+        clientId: row.key,
+        clientname: row.columns['info:clientname']?.$ || '',
+        email: row.columns['info:email']?.$ || '',
+        createdAt: row.columns['info:createdAt']?.$ || '',
+        updatedAt: row.columns['info:updatedAt']?.$ || ''
+      })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  
+      res.status(200).json(clients);
     } catch (error) {
-        console.error('Error fetching clients:', error.message);
-        res.status(500).json({ message: 'Error fetching clients', error: error.message });
-    } finally {
-        session.close(); // Toujours fermer la session
+      console.error('Error fetching clients:', error.message);
+      res.status(500).json({ message: 'Error fetching clients', error: error.message });
     }
-};
+  };
 
-exports.deleteClientByEmail = async (req, res) => {
+  exports.deleteClientByEmail = async (req, res) => {
     const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+  
     try {
-        const client = await Client.findOneAndDelete({ email });
-        if (!client) {
-            return res.status(404).json({ message: 'client not found' });
-        }
-        res.status(200).json({ message: 'client deleted successfully' });
+      const clientByEmailTable = tableAsync('client_by_email');
+      const emailData = await clientByEmailTable.get(email).catch(err => {
+        if (err.message.includes('404')) return null; // Not found
+        throw err;
+      });
+  
+      if (!emailData) {
+        return res.status(404).json({ message: 'Client not found' });
+      }
+  
+      const clientId = emailData.columns['info:clientId']?.$;
+      if (!clientId) {
+        return res.status(404).json({ message: 'Client not found' });
+      }
+  
+      const clientsTable = tableAsync('clients');
+      await clientsTable.del(clientId);
+  
+      // Delete from 'client_by_email' and 'client_by_clientname'
+      await clientByEmailTable.del(email);
+  
+      const clientByClientnameTable = tableAsync('client_by_clientname');
+      const clientname = await clientsTable.get(clientId).then(data => data.columns['info:clientname']?.$).catch(() => null);
+      if (clientname) {
+        await clientByClientnameTable.del(clientname);
+      }
+  
+      res.status(200).json({ message: 'Client deleted successfully' });
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting client', error: error.message });
+      console.error('Error deleting client:', error.message);
+      res.status(500).json({ message: 'Error deleting client', error: error.message });
     }
-};
+  };
 // Fonction pour enregistrer un nouveau client
-exports.register = async (req, res) => {
-    const { clientname, email, password } = req.body; // Récupérer les données de la requête
-    const session = driver.session();
+function generateAccessToken(email) {
+    return jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  }
+  function generateRefreshToken(email) {
+    return jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  }
 
-    try {
-        // Vérifier si un client avec le même email existe déjà
-        const emailResult = await session.run(
-            'MATCH (c:Client {email: $email}) RETURN c LIMIT 1',
-            { email }
-        );
-
-        if (emailResult.records.length > 0) {
-            return res.status(409).json({ message: 'Email already exists' });
-        }
-
-        // Vérifier si un client avec le même clientname existe déjà
-        const clientnameResult = await session.run(
-            'MATCH (c:Client {clientname: $clientname}) RETURN c LIMIT 1',
-            { clientname }
-        );
-
-        if (clientnameResult.records.length > 0) {
-            return res.status(401).json({ message: 'Client name already exists' });
-        }
-
-        // Générer un ID client unique de 20 caractères
-        const clientId = crypto.randomBytes(10).toString('hex'); // 10 bytes = 20 caractères en hexadécimal
-
-        // Hacher le mot de passe avant de le sauvegarder
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Obtenir les timestamps actuels pour createdAt et updatedAt
-        const timestamp = new Date().toISOString();
-
-        // Créer un nouveau client dans Neo4j avec clientId, createdAt et updatedAt
-        await session.run(
-            `
-            CREATE (c:Client {id: $clientId, clientname: $clientname, email: $email, password: $password, createdAt: $createdAt, updatedAt: $updatedAt})
-            `,
-            {
-                clientId, // Inclure l'ID généré aléatoirement
-                clientname,
-                email,
-                password: hashedPassword,
-                createdAt: timestamp,
-                updatedAt: timestamp,
-            }
-        );
-
-        res.status(200).json({ message: 'The new Client has been added successfully!' });
-
-    } catch (error) {
-        console.error('Error during client registration:', error.message);
-        res.status(500).json({ message: 'Error registering the new client', error: error.message });
-    } finally {
-        session.close(); // Toujours fermer la session
+  exports.register = async (req, res) => {
+    const { clientname, email, password } = req.body;
+  
+    if (!clientname || !email || !password) {
+      return res.status(400).json({ message: 'Missing required fields' });
     }
-};
-// Fonction de connexion
-exports.login = async (req, res) => {
-    const { email, password } = req.body;  // Récupérer l'email et le mot de passe depuis la requête
-    const session = driver.session();
-
+  
     try {
-        // Rechercher le client par email dans Neo4j
-        const clientResult = await session.run(
-            'MATCH (c:Client {email: $email}) RETURN c LIMIT 1',
-            { email }
-        );
-
-        if (clientResult.records.length === 0) {
-            console.log('Login attempt failed - client not found:', email);
-            return res.status(404).json({ message: 'Client not found' });
-        }
-
-        // Extraire les données du client
-        const clientNode = clientResult.records[0].get('c').properties;
-
-        // Vérifier si le mot de passe est correct
-        const isMatch = await bcrypt.compare(password, clientNode.password);
-        if (!isMatch) {
-            console.log('Login attempt failed - invalid credentials:', email);
-            return res.status(401).json({ message: 'Invalid credentials' });
-        }
-
-        // Générer un token JWT
-        const token = jwt.sign(
-            { clientId: clientNode.id, email: clientNode.email }, // Inclure les informations nécessaires
-            process.env.JWT_SECRET, // Utiliser la clé secrète définie dans vos variables d'environnement
-            { expiresIn: '1h' } // Durée de validité du token
-        );
-
-        // Configurer le cookie pour le token
-        res.cookie('accessToken', token, {
-            httpOnly: true,
-            secure: true,
-            sameSite: 'None',
-            expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 jours
-        });
-
-        console.log('Client logged in successfully:', clientNode.clientname);
-        res.status(200).json({
-            token,
-            client: {
-                clientId: clientNode.id,
-                clientname: clientNode.clientname,
-                email: clientNode.email,
-            },
-            message: 'Logged in successfully',
-        });
-
+      // Await the async table references
+      const clientsTable = await getAsyncTable('clients');
+      const clientByEmailTable = await getAsyncTable('client_by_email');
+      const clientByClientnameTable = await getAsyncTable('client_by_clientname');
+  
+      // Check if email already exists
+      let existingEmail = null;
+      try {
+        existingEmail = await clientByEmailTable.get(email);
+      } catch (err) {
+        // We handle 404 inside getAsyncTable now, so err here is serious
+        console.error('Error checking email:', err);
+        return res.status(500).json({ message: 'Error checking email uniqueness', error: err.message });
+      }
+  
+      if (existingEmail) {
+        return res.status(409).json({ message: 'Email already exists' });
+      }
+  
+      // Check if clientname already exists
+      let existingClientname = null;
+      try {
+        existingClientname = await clientByClientnameTable.get(clientname);
+      } catch (err) {
+        // Similarly, handle any unexpected errors here
+        console.error('Error checking clientname:', err);
+        return res.status(500).json({ message: 'Error checking clientname uniqueness', error: err.message });
+      }
+  
+      if (existingClientname) {
+        return res.status(409).json({ message: 'Client name already exists' });
+      }
+  
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const timestamp = new Date().toISOString();
+      const clientId = crypto.randomBytes(10).toString('hex');
+  
+      // HBase put requires an array of { column, $: value }
+      const clientData = [
+        { column: 'info:clientname', $: clientname },
+        { column: 'info:email', $: email },
+        { column: 'info:password', $: hashedPassword },
+        { column: 'info:createdAt', $: timestamp },
+        { column: 'info:updatedAt', $: timestamp }
+      ];
+  
+      const emailData = [
+        { column: 'info:clientId', $: clientId }
+      ];
+  
+      const clientnameData = [
+        { column: 'info:clientId', $: clientId }
+      ];
+  
+      await clientsTable.put(clientId, clientData);
+      await clientByEmailTable.put(email, emailData);
+      await clientByClientnameTable.put(clientname, clientnameData);
+  
+      console.log('New client registered successfully');
+      return res.status(201).json({ message: 'The new client has been added successfully!' });
+  
     } catch (error) {
-        console.error('Error during login:', error.message);
-        res.status(500).json({ message: 'Error logging in', error: error.message });
-    } finally {
-        session.close(); // Toujours fermer la session
+      console.error('Error during client registration:', error);
+      return res.status(500).json({ message: 'Error registering the new client', error: error.message });
     }
-};
-
+  };
+  exports.login = async (req, res) => {
+    const { email, password } = req.body;
+  
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Missing email or password' });
+    }
+  
+    try {
+      const clientByEmailTable = getAsyncTable('client_by_email');
+      const clientsTable = getAsyncTable('clients');
+  
+      let emailData;
+      try {
+        emailData = await clientByEmailTable.get(email);
+      } catch (err) {
+        if (err.message.includes('404')) emailData = null; else throw err;
+      }
+  
+      if (!emailData) {
+        console.log('Login attempt failed - client not found:', email);
+        return res.status(404).json({ message: 'Client not found' });
+      }
+  
+      const clientId = emailData.columns?.['info:clientId']?.$;
+      if (!clientId) {
+        console.log('Login attempt failed - clientId not found for email:', email);
+        return res.status(404).json({ message: 'Client not found' });
+      }
+  
+      let clientData;
+      try {
+        clientData = await clientsTable.get(clientId);
+      } catch (err) {
+        if (err.message.includes('404')) clientData = null; else throw err;
+      }
+  
+      if (!clientData) {
+        console.log('Login attempt failed - client not found after email mapping:', email);
+        return res.status(404).json({ message: 'Client not found' });
+      }
+  
+      const hashedPassword = clientData.columns['info:password']?.$ || '';
+      const clientname = clientData.columns['info:clientname']?.$ || '';
+  
+      const isMatch = await bcrypt.compare(password, hashedPassword);
+      if (!isMatch) {
+        console.log('Login attempt failed - invalid credentials:', email);
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+  
+      const accessToken = generateAccessToken(email);
+      const refreshToken = generateRefreshToken(email);
+  
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production', 
+        sameSite: 'Strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+  
+      console.log('Client logged in successfully:', clientname);
+      return res.status(200).json({
+        accessToken,
+        client: {
+          clientId,
+          clientname,
+          email,
+        },
+        message: 'Logged in successfully',
+      });
+  
+    } catch (error) {
+      console.error('Error during login:', error);
+      return res.status(500).json({ message: 'Error logging in', error: error.message });
+    }
+  };
 // exports.requestPassword = async (req, res) => {
 //     const { email } = req.body;
 //     try {
