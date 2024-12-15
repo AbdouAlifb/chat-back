@@ -4,10 +4,10 @@ const { createToken } = require('../utiles/generateToken');
 const { validate } = require('deep-email-validator');
 const Client = require('../models/client');
 // const Token = require('../models/token');
-const { getAsyncTable } = require('../utiles/dbConnect');
+const { getAsyncTable , client } = require('../utiles/dbConnect');
 const ClientToken = require('../models/ClientToken ');
 const jwt = require('jsonwebtoken');
-const { tableAsync } = require('../utiles/dbConnect');
+// const { getAsyncTable } = require('../utiles/dbConnect');
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
@@ -26,107 +26,173 @@ const transporter = nodemailer.createTransport({
 //   neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)  // Authentification
 // );
 exports.searchClients = async (req, res) => {
-    const { query } = req.query;
-    if (!query) return res.status(400).json({ message: 'No search query provided' });
+  const { query } = req.query;
+  if (!query) {
+      return res.status(400).json({ message: 'No search query provided' });
+  }
+
+  try {
+      const clientsTable = await getAsyncTable('clients');
+      const rows = await clientsTable.scan();
+
+      const clients = rows
+          .filter(row => {
+              const clientname = row.columns['info:clientname']?.$ || '';
+              const email = row.columns['info:email']?.$ || '';
+              return clientname.includes(query) || email.includes(query);
+          })
+          .map(row => ({
+              clientId: row.key,
+              clientname: row.columns['info:clientname']?.$ || '',
+              email: row.columns['info:email']?.$ || '',
+          }));
+
+      res.status(200).json(clients);
+  } catch (error) {
+      console.error('Error searching clients:', error.message);
+      res.status(500).json({ message: 'Error searching clients', error: error.message });
+  }
+};
   
-    // Instead of MATCH (c:Client)... use a Hive SELECT statement
-    // If you have a 'clients' table with 'clientname' and 'email' columns:
-    const searchQuery = `SELECT clientname, email FROM clients WHERE clientname LIKE '%${query}%' OR email LIKE '%${query}%'`;
-    
-    hive.execute(searchQuery, function(err, data) {
-      if (err) {
-        console.error('Error searching clients:', err);
-        return res.status(500).json({ message: 'Error searching clients', error: err.message });
-      }
-  
-      // data will be an array of results
-      // each row might come as an array of values depending on the driver used
-      // Adjust parsing accordingly
-      const clients = data.map(row => ({
-        clientname: row.clientname, // or row[0] depending on driver format
-        email: row.email           // or row[1]
-      }));
-      
-      return res.status(200).json(clients);
-    });
-  };
-  
-  exports.getMe = async (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
+exports.getMe = async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
       return res.status(401).json({ message: 'Authentication token is missing' });
-    }
-  
-    try {
+  }
+
+  try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const email = decoded.email;
-  
-      const clientByEmailTable = tableAsync('client_by_email');
-      const emailData = await clientByEmailTable.get(email).catch(err => {
-        if (err.message.includes('404')) return null; // Not found
-        throw err;
-      });
-  
+
+      const clientByEmailTable = await getAsyncTable('client_by_email');
+      const emailData = await clientByEmailTable.get(email);
+
       if (!emailData) {
-        return res.status(404).json({ message: 'User not found' });
+          return res.status(404).json({ message: 'User not found' });
       }
-  
+
       const clientId = emailData.columns['info:clientId']?.$;
       if (!clientId) {
-        return res.status(404).json({ message: 'User not found' });
+          return res.status(404).json({ message: 'User not found' });
       }
-  
-      const clientsTable = tableAsync('clients');
-      const clientData = await clientsTable.get(clientId).catch(err => {
-        if (err.message.includes('404')) return null; // Not found
-        throw err;
-      });
-  
+
+      const clientsTable = await getAsyncTable('clients');
+      const clientData = await clientsTable.get(clientId);
+
       if (!clientData) {
-        return res.status(404).json({ message: 'User not found' });
+          return res.status(404).json({ message: 'User not found' });
       }
-  
+
       const user = {
-        clientId: clientId,
-        clientname: clientData.columns['info:clientname']?.$ || '',
-        email: clientData.columns['info:email']?.$ || ''
+          clientId: clientId,
+          clientname: clientData.columns['info:clientname']?.$ || '',
+          email: clientData.columns['info:email']?.$ || ''
       };
-  
+
       res.status(200).json(user);
-    } catch (error) {
+  } catch (error) {
       console.error('Error fetching user:', error.message);
       return res.status(401).json({ message: 'Invalid token', error: error.message });
-    }
-  };
+  }
+};
 const generatePassword = () => {
     return crypto.randomBytes(8).toString('hex'); 
 };
+
+async function scanTable(tableName) {
+  return new Promise((resolve, reject) => {
+    const scanResults = [];
+    const scanner = client.table(tableName).scan({}, (err, cells) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(cells);
+    });
+
+    scanner
+      .on('readable', function () {
+        let row;
+        while ((row = this.read())) {
+          scanResults.push(row);
+        }
+      })
+      .on('end', function () {
+        resolve(scanResults);
+      });
+  });
+}
+
+// Update the getAsyncTable function to accommodate scanning if needed
+async function getAsyncTablea(tableName) {
+  const table = client.table(tableName);
+  return {
+    get: (rowKey) => {
+      return new Promise((resolve, reject) => {
+        table.row(rowKey).get((err, data) => {
+          if (err) {
+            if (err.code === 404) {
+              return resolve(null); // Not found
+            } else {
+              return reject(err);
+            }
+          }
+          resolve(data || null);
+        });
+      });
+    },
+    put: (rowKey, values) => {
+      return new Promise((resolve, reject) => {
+        table.row(rowKey).put(values, (err) => {
+          if (err) {
+            return reject(err);
+          }
+          resolve(true);
+        });
+      });
+    },
+    scan: () => scanTable(tableName) // Wire up the scan method to use scanTable
+  };
+}
+
+// getAllClients implementation using scanTable
+// Now use the client in your function if needed
 exports.getAllClients = async (req, res) => {
-    try {
-      const clientsTable = tableAsync('clients');
+  try {
+      const clientsTable = await getAsyncTable('clients');
       const rows = await clientsTable.scan();
-  
-      const clients = rows.map(row => ({
-        clientId: row.key,
-        clientname: row.columns['info:clientname']?.$ || '',
-        email: row.columns['info:email']?.$ || '',
-        createdAt: row.columns['info:createdAt']?.$ || '',
-        updatedAt: row.columns['info:updatedAt']?.$ || ''
+
+      // Organize data into clients by their keys
+      const clientData = rows.reduce((acc, row) => {
+          const { key, column, $: value } = row;
+          if (!acc[key]) {
+              acc[key] = { clientId: key };
+          }
+          acc[key][column.split(':')[1]] = value; // e.g., "info:clientname" becomes "clientname"
+          return acc;
+      }, {});
+
+      // Transform the object into an array of client objects
+      const clients = Object.values(clientData).map(client => ({
+          clientId: client.clientId,
+          clientname: client.clientname || '',
+          email: client.email || '',
+          createdAt: client.createdAt || '',
+          updatedAt: client.updatedAt || '',
       })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  
+
       res.status(200).json(clients);
-    } catch (error) {
+  } catch (error) {
       console.error('Error fetching clients:', error.message);
       res.status(500).json({ message: 'Error fetching clients', error: error.message });
-    }
-  };
+  }
+};
 
   exports.deleteClientByEmail = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required' });
   
     try {
-      const clientByEmailTable = tableAsync('client_by_email');
+      const clientByEmailTable = getAsyncTable('client_by_email');
       const emailData = await clientByEmailTable.get(email).catch(err => {
         if (err.message.includes('404')) return null; // Not found
         throw err;
@@ -141,13 +207,13 @@ exports.getAllClients = async (req, res) => {
         return res.status(404).json({ message: 'Client not found' });
       }
   
-      const clientsTable = tableAsync('clients');
+      const clientsTable = getAsyncTable('clients');
       await clientsTable.del(clientId);
   
       // Delete from 'client_by_email' and 'client_by_clientname'
       await clientByEmailTable.del(email);
   
-      const clientByClientnameTable = tableAsync('client_by_clientname');
+      const clientByClientnameTable = getAsyncTable('client_by_clientname');
       const clientname = await clientsTable.get(clientId).then(data => data.columns['info:clientname']?.$).catch(() => null);
       if (clientname) {
         await clientByClientnameTable.del(clientname);

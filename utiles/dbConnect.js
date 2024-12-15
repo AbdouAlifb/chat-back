@@ -1,6 +1,6 @@
+// dbConnect.js
 require('dotenv').config();
 const hbase = require('hbase');
-const { promisify } = require('util');
 
 const client = hbase({
   host: process.env.HBASE_HOST || 'localhost',
@@ -19,6 +19,7 @@ async function dbConnect() {
     });
   });
 }
+
 async function getAsyncTable(tableName) {
   const table = client.table(tableName);
   return {
@@ -26,9 +27,8 @@ async function getAsyncTable(tableName) {
       return new Promise((resolve, reject) => {
         table.row(rowKey).get((err, data) => {
           if (err) {
-            // If error code is 404, just resolve with null
             if (err.code === 404) {
-              return resolve(null);
+              return resolve(null); // Not found
             } else {
               return reject(err);
             }
@@ -47,7 +47,27 @@ async function getAsyncTable(tableName) {
         });
       });
     },
+    scan: () => {
+      return new Promise((resolve, reject) => {
+        const scanner = table.scan(); // Assuming your client supports scan like this
+        const scanResults = [];
+        
+        scanner
+          .on('error', (err) => {
+            reject(err);
+          })
+          .on('readable', function () {
+            let row;
+            while ((row = this.read())) {
+              scanResults.push(row);
+            }
+          })
+          .on('end', function () {
+            resolve(scanResults);
+          });
+      });
+    }
   };
 }
 
-module.exports = { dbConnect, getAsyncTable };
+module.exports = { dbConnect, getAsyncTable, client };

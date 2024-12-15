@@ -19,6 +19,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "hbase": "^0.6.1",
+    "hbase-client": "^0.3.0",
     "hive-driver": "^1.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.7.1",
@@ -27,6 +28,7 @@
     "node-hive": "^0.1.1",
     "nodemailer": "^6.9.15",
     "socket.io": "^4.8.0",
-    "thrift": "^0.9.3"
+    "thrift": "^0.21.0",
+    "uuid": "^11.0.3"
   }
 }

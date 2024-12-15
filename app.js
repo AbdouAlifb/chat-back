@@ -88,10 +88,10 @@ io.on('connection', (socket) => {
 const clientauthRoutes = require('./routes/clientauthRoutes');
 app.use('/api/client/auth', clientauthRoutes);
 
-// const profileRoutes = require('./routes/profileRoutes');
-// app.use('/api/client', profileRoutes);
+const profileRoutes = require('./routes/profileRoutes');
+app.use('/api/client', profileRoutes);
 
 
-// const messageRoutes = require('./routes/messageRoutes');
-// app.use('/api/messages', messageRoutes);
-// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const messageRoutes = require('./routes/messageRoutes');
+app.use('/api/messages', messageRoutes);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
