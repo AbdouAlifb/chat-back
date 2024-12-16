@@ -5,32 +5,31 @@ const path = require('path');
 exports.upsertProfile = async (req, res) => {
   const { clientId } = req.params;
   const profileData = req.body;
+  
   console.log('Data coming profile', profileData, clientId);
 
   try {
     // Handle file upload
     if (req.file) {
       profileData.profileImage = req.file.filename;
-    } else if (!profileData.profileImage) {
+    } else if (profileData.profileImage === undefined) {
       profileData.profileImage = null;
     }
 
     // Clean up profileData by removing empty values
     for (const key in profileData) {
-      if (!profileData[key]) {
-        profileData[key] = null;
+      if (profileData[key] == null || profileData[key] === '') {
+        profileData[key] = '';
       }
     }
 
     const profilesTable = await getAsyncTable('profiles');
 
-    // Convert profileData to HBase format
     const profileColumns = Object.entries(profileData).map(([key, value]) => ({
       column: `info:${key}`,
-      $: value
+      $: value || ''
     }));
 
-    // Upsert profile
     await profilesTable.put(clientId, profileColumns);
 
     console.log('Successfully stored');
@@ -49,7 +48,9 @@ exports.getProfile = async (req, res) => {
     const profilesTable = await getAsyncTable('profiles');
     const profileRow = await profilesTable.get(clientId);
     
-    if (!profileRow) {
+    console.log('Retrieved Profile Row:', profileRow);
+
+    if (!profileRow || profileRow.length === 0) {
       return res.status(404).json({ message: 'Profile not found' });
     }
 
